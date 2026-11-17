@@ -1,7 +1,12 @@
-# QuerySentinel
-<img src="docs/assets/querysentinel-logo.png" alt="QuerySentinel logo" width="96">
+<img align="right" src="docs/assets/querysentinel-logo.png" alt="QuerySentinel logo" width="96">
 
-QuerySentinel monitors PostgreSQL for slow queries and execution errors. When a query slows down, an AI agent inspects the available database evidence and suggests what to check next.
+# QuerySentinel
+
+PostgreSQL query monitoring and AI-assisted triage. QuerySentinel detects slowdowns and execution errors, tracks recurring findings, and gives operators a dashboard and an MCP endpoint to investigate them.
+
+[![Tests](https://github.com/arturmkr/querysentinel/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/arturmkr/querysentinel/actions/workflows/ci.yml)
+
+The agent uses read-only database tools and suggests checks you can run to verify its findings. Detection works without a model API key.
 
 ### Try it on LEGO
 
