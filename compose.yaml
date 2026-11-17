@@ -1,0 +1,143 @@
+name: querysentinel
+
+x-app-environment: &app-environment
+  SENTINEL_DATABASE_URL: postgresql+psycopg://sentinel:${SENTINEL_DB_PASSWORD}@sentinel-postgres:5432/sentinel
+  API_TOKEN: ${API_TOKEN:?set API_TOKEN in .env}
+  MCP_ALLOWED_HOSTS: '${MCP_ALLOWED_HOSTS:-["127.0.0.1","127.0.0.1:*","localhost","localhost:*","[::1]","[::1]:*"]}'
+  MCP_ALLOWED_ORIGINS: '${MCP_ALLOWED_ORIGINS:-["http://127.0.0.1","http://127.0.0.1:*","http://localhost","http://localhost:*","http://[::1]","http://[::1]:*"]}'
+  AIRLINES_DATABASE_URL: postgresql://sentinel_monitor:${TARGET_MONITOR_PASSWORD}@target-postgres:5432/airlines
+  LEGO_DATABASE_URL: postgresql://sentinel_monitor:${TARGET_MONITOR_PASSWORD}@target-postgres:5432/lego
+  AIRLINES_WORKLOAD_DATABASE_URL: postgresql://demo_workload:${DEMO_WORKLOAD_PASSWORD}@target-postgres:5432/airlines
+  LEGO_WORKLOAD_DATABASE_URL: postgresql://demo_workload:${DEMO_WORKLOAD_PASSWORD}@target-postgres:5432/lego
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+  AI_MODEL: ${AI_MODEL:-openai:gpt-5-mini}
+  WEBHOOK_URL: ${WEBHOOK_URL:-}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  CONFIG_PATH: /app/config.yaml
+
+services:
+  target-postgres:
+    image: postgres:18
+    entrypoint:
+      - bash
+      - -ec
+      - 'install -d -o postgres -g postgres -m 0750 /var/log/querysentinel; exec docker-entrypoint.sh "$$@"'
+      - --
+    environment:
+      POSTGRES_PASSWORD: ${TARGET_ADMIN_PASSWORD:?set TARGET_ADMIN_PASSWORD in .env}
+      TARGET_MONITOR_PASSWORD: ${TARGET_MONITOR_PASSWORD:?set TARGET_MONITOR_PASSWORD in .env}
+      DEMO_WORKLOAD_PASSWORD: ${DEMO_WORKLOAD_PASSWORD:?set DEMO_WORKLOAD_PASSWORD in .env}
+      QS_DISPOSABLE_TARGET: "true"
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - compute_query_id=on
+      - -c
+      - pg_stat_statements.track=all
+      - -c
+      - pg_stat_statements.max=10000
+      - -c
+      - logging_collector=on
+      - -c
+      - log_destination=jsonlog
+      - -c
+      - log_directory=/var/log/querysentinel
+      - -c
+      - log_timezone=UTC
+      - -c
+      - log_min_messages=error
+      - -c
+      - log_min_error_statement=panic
+      - -c
+      - log_error_verbosity=terse
+      - -c
+      - log_parameter_max_length_on_error=0
+      - -c
+      - log_parameter_max_length=0
+      - -c
+      - log_min_duration_statement=${POSTGRES_LOG_MIN_DURATION_STATEMENT:-1s}
+    ports:
+      - "5433:5432"
+    volumes:
+      - target-data:/var/lib/postgresql
+      - target-error-logs:/var/log/querysentinel
+      - ./scripts/init-target.sh:/docker-entrypoint-initdb.d/10-querysentinel.sh:ro
+      - ./scripts/sql:/workspace/scripts/sql:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "psql -U postgres -d airlines -Atqc 'SELECT 1' && psql -U postgres -d lego -Atqc 'SELECT 1'",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  sentinel-postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: sentinel
+      POSTGRES_PASSWORD: ${SENTINEL_DB_PASSWORD:?set SENTINEL_DB_PASSWORD in .env}
+      POSTGRES_DB: sentinel
+    volumes:
+      - sentinel-data:/var/lib/postgresql
+    ports:
+      - "5434:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sentinel -d sentinel"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  sentinel-api:
+    build: .
+    environment:
+      <<: *app-environment
+      UI_ADMIN_PASSWORD: ${UI_ADMIN_PASSWORD:-}
+    command: ["sh", "-c", "alembic upgrade head && uvicorn querysentinel.api:app --host 0.0.0.0 --port 8000"]
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      sentinel-postgres:
+        condition: service_healthy
+      target-postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  sentinel-worker:
+    build: .
+    environment: *app-environment
+    command: ["python", "-m", "querysentinel.worker"]
+    volumes:
+      - target-error-logs:/var/log/querysentinel:ro
+    depends_on:
+      sentinel-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; os.kill(1, 0)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  target-data:
+  target-error-logs:
+  sentinel-data:

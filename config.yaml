@@ -1,0 +1,39 @@
+targets:
+  - id: airlines
+    engine: postgresql
+    dsn_env: AIRLINES_DATABASE_URL
+    error_log_dir: /var/log/querysentinel
+    error_log_database: airlines
+    workload_dsn_env: AIRLINES_WORKLOAD_DATABASE_URL
+    synthetic_workload_enabled: true
+    enabled: true
+  - id: lego
+    engine: postgresql
+    dsn_env: LEGO_DATABASE_URL
+    error_log_dir: /var/log/querysentinel
+    error_log_database: lego
+    workload_dsn_env: LEGO_WORKLOAD_DATABASE_URL
+    synthetic_workload_enabled: true
+    enabled: true
+
+schedule:
+  cron: "*/15 * * * *"
+
+detection:
+  min_calls_per_interval: 10
+  meaningful_latency_ms: 20.0
+  latency_regression_factor: 3.0
+  workload_regression_factor: 3.0
+  expensive_query_mean_ms: 250.0
+  temp_blocks_threshold: 100
+  block_read_ratio_threshold: 0.35
+  max_llm_investigations_per_scan: 10
+  max_age_minutes: 1440
+
+notifications:
+  console: true
+  webhook: false
+
+retention:
+  interval_days: 30
+  checkpoint_days: 7
