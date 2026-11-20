@@ -317,9 +317,11 @@ async def test_investigation_dialog_survives_dashboard_refresh(monkeypatch) -> N
         await user.should_not_see("Run synthetic workload")
         user.find(ui.input).type("ui-test")
         user.find("Log in").click()
-        await user.should_see("Recent scans (latest 20)")
+        await user.should_see("Recent scans")
+        await user.should_see("Latest 20")
         user.find("Run synthetic workload").click()
-        await user.should_see("Synthetic workload: Queued")
+        await user.should_see("Synthetic workload")
+        await user.should_see("Queued")
         with factory() as session:
             job = session.scalars(select(SyntheticWorkloadJob)).one()
             job.status = JobStatus.COMPLETED
@@ -341,18 +343,25 @@ async def test_investigation_dialog_survives_dashboard_refresh(monkeypatch) -> N
         assert any('"calls": 10' in code.content for code in user.find(ui.code).elements)
         await user.should_not_see(ui.json_editor)
 
-        # Wait for the timer to replace the finding card while the dialog is open.
+        # Change the finding so the timer replaces its row while the dialog is open.
+        with factory() as session:
+            finding = session.scalars(select(Finding)).one()
+            finding.summary = "Updated regression summary"
+            session.commit()
         async with asyncio.timeout(5):
             while not old_button.is_deleted:
                 await asyncio.sleep(0.05)
         await user.should_see("Open investigation")
+        await user.should_see("Updated regression summary")
         assert not dialog.is_deleted
         assert dialog.value
         await user.should_see("Measured symptom")
-        await user.should_see("Synthetic workload: Completed · 9 succeeded · 1 failed")
+        await user.should_see("Completed")
+        await user.should_see("9 succeeded · 1 failed")
         user.find("Close").click()
         assert not dialog.value
         await user.open("/ui/")
         user.find(ui.input).type("ui-test")
         user.find("Log in").click()
-        await user.should_see("Synthetic workload: Completed · 9 succeeded · 1 failed")
+        await user.should_see("Completed")
+        await user.should_see("9 succeeded · 1 failed")
